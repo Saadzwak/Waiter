@@ -77,3 +77,20 @@
     @apply bg-emerald-100 text-emerald-900;
   }
 }
+
+/* ── Floating animation (hero phone mockup) ────────────────────────── */
+@keyframes float {
+  0%, 100% { transform: translateY(0px) rotate(-0.5deg); }
+  50%       { transform: translateY(-14px) rotate(0.5deg); }
+}
+
+.animate-float {
+  animation: float 5.5s ease-in-out infinite;
+  will-change: transform;
+}
+
+/* ── Retention stats background glow pulse ──────────────────────────── */
+@keyframes glow-pulse {
+  0%, 100% { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+  50%       { opacity: 0.6; transform: translate(-50%, -50%) scale(1.15); }
+}

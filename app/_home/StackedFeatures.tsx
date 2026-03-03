@@ -65,7 +65,7 @@ const FEATURES: Feature[] = [
   },
 ];
 
-const CARD_SCROLL = 400; // px of scroll per card transition
+const CARD_SCROLL = 650; // px of scroll per card transition
 
 function FeatureCard({ feature }: { feature: Feature }) {
   const Icon = feature.icon;
