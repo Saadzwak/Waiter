@@ -1,0 +1,182 @@
+import { openai, MODELS } from "@/lib/openai";
+import { createAdminClient } from "@/lib/supabase/admin";
+import { embedMenuItem } from "@/modules/menu/embeddings";
+import { PDFParse } from "pdf-parse";
+
+type ParsedItem = {
+  name: string;
+  description: string | null;
+  price: number | null;
+  currency: string;
+  tags: string[];
+  allergens: string[];
+  pairing_suggestions: string[];
+};
+
+type ParsedCategory = {
+  name: string;
+  position: number;
+  items: ParsedItem[];
+};
+
+type ParsedMenu = {
+  categories: ParsedCategory[];
+};
+
+const EXTRACTION_PROMPT = `Extract the complete menu from this restaurant document and return a JSON object with this exact structure:
+{
+  "categories": [
+    {
+      "name": "category name",
+      "position": 0,
+      "items": [
+        {
+          "name": "dish name",
+          "description": "description or null",
+          "price": 12.50,
+          "currency": "EUR",
+          "tags": ["vegan", "vegetarian", "gluten-free", "spicy", "halal", "kosher", "dairy-free", "seafood", "nuts", "popular"],
+          "allergens": ["gluten", "dairy", "nuts", "eggs", "soy", "fish", "shellfish"],
+          "pairing_suggestions": ["Bordeaux", "sparkling water"]
+        }
+      ]
+    }
+  ]
+}
+
+Rules:
+- Only include tags and allergens that are clearly present or implied
+- Keep descriptions concise (1-2 sentences max)
+- Extract ALL items visible in the menu
+- Default currency to EUR if not specified
+- Set price to null if not listed`;
+
+async function extractMenuFromText(text: string): Promise<ParsedMenu> {
+  const response = await openai.chat.completions.create({
+    model: MODELS.chat,
+    response_format: { type: "json_object" },
+    messages: [
+      {
+        role: "user",
+        content: `${EXTRACTION_PROMPT}\n\nMENU TEXT:\n${text.slice(0, 12000)}`,
+      },
+    ],
+    max_tokens: 4000,
+  });
+  return JSON.parse(response.choices[0].message.content ?? "{}") as ParsedMenu;
+}
+
+async function extractMenuFromImage(imageUrl: string): Promise<ParsedMenu> {
+  const response = await openai.chat.completions.create({
+    model: MODELS.vision,
+    response_format: { type: "json_object" },
+    messages: [
+      {
+        role: "user",
+        content: [
+          {
+            type: "image_url",
+            image_url: { url: imageUrl, detail: "high" },
+          },
+          { type: "text", text: EXTRACTION_PROMPT },
+        ],
+      },
+    ],
+    max_tokens: 4000,
+  });
+  return JSON.parse(response.choices[0].message.content ?? "{}") as ParsedMenu;
+}
+
+async function saveMenu(restaurantId: string, menu: ParsedMenu): Promise<void> {
+  const supabase = createAdminClient();
+
+  for (const category of menu.categories) {
+    const { data: catData, error: catError } = await supabase
+      .from("menu_categories")
+      .insert({
+        restaurant_id: restaurantId,
+        name: category.name,
+        position: category.position,
+      })
+      .select("id")
+      .single();
+
+    if (catError) throw catError;
+
+    for (const item of category.items) {
+      const { data: itemData, error: itemError } = await supabase
+        .from("menu_items")
+        .insert({
+          restaurant_id: restaurantId,
+          category_id: catData.id,
+          name: item.name,
+          description: item.description,
+          price: item.price,
+          currency: item.currency || "EUR",
+          tags: item.tags || [],
+          allergens: item.allergens || [],
+          pairing_suggestions: item.pairing_suggestions || [],
+        })
+        .select("id, name, description, tags, allergens, pairing_suggestions")
+        .single();
+
+      if (itemError) throw itemError;
+
+      await embedMenuItem({
+        id: itemData.id,
+        name: itemData.name,
+        description: itemData.description,
+        tags: itemData.tags,
+        allergens: itemData.allergens,
+        pairing_suggestions: itemData.pairing_suggestions,
+      });
+    }
+  }
+}
+
+export async function ingestMenu(
+  jobId: string,
+  restaurantId: string,
+  fileUrl: string,
+  fileType: "pdf" | "image"
+): Promise<void> {
+  const supabase = createAdminClient();
+
+  await supabase
+    .from("ingestion_jobs")
+    .update({ status: "processing", updated_at: new Date().toISOString() })
+    .eq("id", jobId);
+
+  try {
+    let menu: ParsedMenu;
+
+    if (fileType === "pdf") {
+      const response = await fetch(fileUrl);
+      const buffer = Buffer.from(await response.arrayBuffer());
+      const parser = new PDFParse({ data: buffer });
+      const result = await parser.getText();
+      await parser.destroy();
+      menu = await extractMenuFromText(result.text);
+    } else {
+      menu = await extractMenuFromImage(fileUrl);
+    }
+
+    await saveMenu(restaurantId, menu);
+
+    await supabase
+      .from("ingestion_jobs")
+      .update({ status: "done", updated_at: new Date().toISOString() })
+      .eq("id", jobId);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Unknown error";
+    await supabase
+      .from("ingestion_jobs")
+      .update({
+        status: "error",
+        error_message: message,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", jobId);
+    throw err;
+  }
+}
