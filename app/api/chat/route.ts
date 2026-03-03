@@ -29,6 +29,7 @@ export async function POST(req: NextRequest) {
   const result = await buildChatStream({
     restaurantId: restaurant.id,
     restaurantName: restaurant.name,
+    menuLanguage: restaurant.language_default,
     messages,
   });
 

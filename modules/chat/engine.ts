@@ -1,10 +1,13 @@
 import { streamText, convertToModelMessages, stepCountIs } from "ai";
-import { openai } from "@ai-sdk/openai";
+import { openai as aiSdkOpenai } from "@ai-sdk/openai";
+import OpenAI from "openai";
 import { z } from "zod";
 import { generateEmbedding } from "@/modules/menu/embeddings";
 import { buildSystemPrompt } from "@/modules/chat/prompts";
 import { createAdminClient } from "@/lib/supabase/admin";
 import type { UIMessage, TextUIPart } from "ai";
+
+const openaiClient = new OpenAI();
 
 type MatchedItem = {
   id: string;
@@ -18,6 +21,41 @@ type MatchedItem = {
   chef_notes: string | null;
   similarity: number;
 };
+
+const SIMILARITY_THRESHOLD = 0.3;
+
+async function detectLanguageAndTranslate(
+  userText: string,
+  menuLanguage: string
+): Promise<{ userLanguage: string; queryForEmbedding: string }> {
+  const res = await openaiClient.chat.completions.create({
+    model: "gpt-4o-mini",
+    response_format: { type: "json_object" },
+    max_tokens: 200,
+    messages: [
+      {
+        role: "system",
+        content: `You are a language detection and translation assistant. Given a user message, return a JSON object with exactly two fields:
+- "userLanguage": the BCP-47 language code of the user's message (e.g. "en", "fr", "ar", "es", "de", "it", "pt", "zh", "ja", "ru", "nl", "ko")
+- "queryForEmbedding": the user's message translated to ${menuLanguage}, keeping only the core food/menu semantic content. Strip filler words, keep the intent. If the message is already in ${menuLanguage}, return it unchanged.`,
+      },
+      { role: "user", content: userText },
+    ],
+  });
+
+  try {
+    const parsed = JSON.parse(res.choices[0].message.content ?? "{}") as {
+      userLanguage?: string;
+      queryForEmbedding?: string;
+    };
+    return {
+      userLanguage: parsed.userLanguage ?? "en",
+      queryForEmbedding: parsed.queryForEmbedding ?? userText,
+    };
+  } catch {
+    return { userLanguage: "en", queryForEmbedding: userText };
+  }
+}
 
 async function searchRelevantItems(
   restaurantId: string,
@@ -69,10 +107,12 @@ async function searchWeb(query: string): Promise<string> {
 export async function buildChatStream({
   restaurantId,
   restaurantName,
+  menuLanguage,
   messages,
 }: {
   restaurantId: string;
   restaurantName: string;
+  menuLanguage: string;
   messages: UIMessage[];
 }) {
   const lastUserMessage = [...messages]
@@ -85,12 +125,21 @@ export async function buildChatStream({
       .map((p) => p.text)
       .join(" ") ?? "";
 
-  const embedding = await generateEmbedding(lastText);
-  const relevantItems = await searchRelevantItems(restaurantId, embedding);
-  const systemPrompt = buildSystemPrompt(restaurantName, relevantItems);
+  // Detect user language + translate query to menu language for accurate embedding
+  const { userLanguage, queryForEmbedding } = await detectLanguageAndTranslate(
+    lastText,
+    menuLanguage
+  );
+
+  const embedding = await generateEmbedding(queryForEmbedding);
+  const allItems = await searchRelevantItems(restaurantId, embedding);
+  // Filter out low-confidence matches to prevent hallucination on irrelevant context
+  const relevantItems = allItems.filter((item) => item.similarity >= SIMILARITY_THRESHOLD);
+
+  const systemPrompt = buildSystemPrompt(restaurantName, relevantItems, undefined, userLanguage);
 
   return streamText({
-    model: openai("gpt-4o"),
+    model: aiSdkOpenai("gpt-4o"),
     system: systemPrompt,
     messages: await convertToModelMessages(messages),
     maxOutputTokens: 600,
