@@ -9,6 +9,7 @@ import {
   Sparkles,
   Settings,
   LogOut,
+  Zap,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { logout } from "@/app/actions/auth";
@@ -21,6 +22,8 @@ const NAV_ITEMS = [
   { label: "Insights", href: "/dashboard/insights", icon: Sparkles },
   { label: "Settings", href: "/dashboard/settings", icon: Settings },
 ];
+
+const SERVICE_ITEM = { label: "Service", href: "/dashboard/service", icon: Zap };
 
 type Props = { restaurant: Restaurant | null };
 
@@ -76,6 +79,27 @@ export function Sidebar({ restaurant }: Props) {
           })}
         </nav>
 
+        {/* Service mode — prominent desktop link */}
+        <div className="px-3 pb-2 border-t border-gray-100 pt-3">
+          <Link
+            href={SERVICE_ITEM.href}
+            className={cn(
+              "flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-medium transition-colors",
+              isActive(SERVICE_ITEM.href)
+                ? "bg-amber-50 text-amber-700"
+                : "text-gray-500 hover:bg-amber-50 hover:text-amber-700"
+            )}
+          >
+            <Zap
+              className={cn(
+                "w-4 h-4 shrink-0 transition-colors",
+                isActive(SERVICE_ITEM.href) ? "text-amber-500" : "text-gray-400"
+              )}
+            />
+            Service
+          </Link>
+        </div>
+
         {/* Logout */}
         <div className="px-3 py-3 border-t border-gray-100">
           <form action={logout}>
@@ -90,7 +114,7 @@ export function Sidebar({ restaurant }: Props) {
         </div>
       </aside>
 
-      {/* Mobile bottom nav */}
+      {/* Mobile bottom nav — Service replaces sign out (sign out lives in Settings on mobile) */}
       <nav className="md:hidden fixed bottom-0 left-0 right-0 z-50 bg-white/95 backdrop-blur border-t border-gray-100 flex items-center justify-around px-2 py-2 pb-safe">
         {NAV_ITEMS.map(({ label, href, icon: Icon }) => {
           const active = isActive(href);
@@ -108,15 +132,17 @@ export function Sidebar({ restaurant }: Props) {
             </Link>
           );
         })}
-        <form action={logout}>
-          <button
-            type="submit"
-            className="flex flex-col items-center gap-1 px-3 py-1.5 rounded-xl transition-colors text-gray-400"
-          >
-            <LogOut className="w-5 h-5" />
-            <span className="text-[10px] font-medium">Sign out</span>
-          </button>
-        </form>
+        {/* Service — amber, always visible on mobile */}
+        <Link
+          href={SERVICE_ITEM.href}
+          className={cn(
+            "flex flex-col items-center gap-1 px-3 py-1.5 rounded-xl transition-colors",
+            isActive(SERVICE_ITEM.href) ? "text-amber-500" : "text-amber-400"
+          )}
+        >
+          <Zap className="w-5 h-5" />
+          <span className="text-[10px] font-medium">Service</span>
+        </Link>
       </nav>
     </>
   );
