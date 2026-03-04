@@ -32,7 +32,8 @@ export function buildSystemPrompt(
   restaurantName: string,
   items: MatchedItem[],
   chefNotes?: string,
-  userLanguage?: string
+  userLanguage?: string,
+  soldOutItems?: string[]
 ): string {
   const languageName = userLanguage
     ? (LANGUAGE_NAMES[userLanguage] ?? userLanguage)
@@ -58,6 +59,11 @@ export function buildSystemPrompt(
     ? `\nRESTAURANT KNOWLEDGE (from our team):\n${chefNotes}\n`
     : "";
 
+  const soldOutSection =
+    soldOutItems && soldOutItems.length > 0
+      ? `\nSOLD OUT TONIGHT:\nThe following items are currently unavailable. If a customer asks about them, inform them warmly and naturally that the item is sold out for tonight, then suggest an available alternative from the menu above.\n${soldOutItems.map((n) => `- ${n}`).join("\n")}\n`
+      : "";
+
   const languageLock = languageName
     ? `\nLANGUAGE — NON-NEGOTIABLE:
 The customer is communicating in ${languageName}. You MUST respond exclusively in ${languageName} for the entire conversation. This applies to every single message, regardless of the language used in the menu, dish names, or these instructions. Do not switch language under any circumstance.\n`
@@ -80,7 +86,7 @@ TONE:
 
 MENU (most relevant dishes for this conversation):
 ${menuContext || "No relevant menu items were found for this query."}
-${chefKnowledge}
+${soldOutSection}${chefKnowledge}
 PRICE INTEGRITY — ABSOLUTE:
 A price exists ONLY if it appears explicitly in the MENU CONTEXT above with a specific number and currency. If an item is mentioned in the conversation but its price is NOT shown above, say (in the customer's language): "I don't have the price for that item — our team will be happy to give you the exact information." NEVER estimate, guess, approximate, or use any general knowledge about typical prices.
 

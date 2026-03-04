@@ -131,12 +131,22 @@ export async function buildChatStream({
     menuLanguage
   );
 
-  const embedding = await generateEmbedding(queryForEmbedding);
+  const supabase = createAdminClient();
+  const [embedding, { data: unavailableData }] = await Promise.all([
+    generateEmbedding(queryForEmbedding),
+    supabase
+      .from("menu_items")
+      .select("name")
+      .eq("restaurant_id", restaurantId)
+      .eq("available", false),
+  ]);
+
   const allItems = await searchRelevantItems(restaurantId, embedding);
   // Filter out low-confidence matches to prevent hallucination on irrelevant context
   const relevantItems = allItems.filter((item) => item.similarity >= SIMILARITY_THRESHOLD);
+  const soldOutItems = unavailableData?.map((i) => i.name) ?? [];
 
-  const systemPrompt = buildSystemPrompt(restaurantName, relevantItems, undefined, userLanguage);
+  const systemPrompt = buildSystemPrompt(restaurantName, relevantItems, undefined, userLanguage, soldOutItems);
 
   const stream = streamText({
     model: aiSdkOpenai("gpt-4o"),
