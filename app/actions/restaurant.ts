@@ -1,10 +1,12 @@
 "use server";
 
+import { cookies } from "next/headers";
 import { createClient } from "@/lib/supabase/server";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
+import type { Restaurant } from "@/types";
 
-export type RestaurantActionState = { error?: string; slug?: string };
+export type RestaurantActionState = { error?: string; restaurant?: Restaurant };
 
 function generateSlug(name: string): string {
   const base = name
@@ -28,27 +30,28 @@ export async function createRestaurant(
   if (!user) return { error: "Not authenticated." };
 
   const name = (formData.get("name") as string).trim();
-  const description = (formData.get("description") as string).trim() || null;
   const language_default = (formData.get("language_default") as string) || "en";
 
-  // Try up to 3 times in case of slug collision
   for (let attempt = 0; attempt < 3; attempt++) {
     const slug = generateSlug(name);
-    const { error } = await supabase.from("restaurants").insert({
-      owner_id: user.id,
-      slug,
-      name,
-      description,
-      language_default,
-    });
+    const { data, error } = await supabase
+      .from("restaurants")
+      .insert({ owner_id: user.id, slug, name, language_default })
+      .select()
+      .single();
 
-    if (!error) {
+    if (!error && data) {
+      const cookieStore = await cookies();
+      cookieStore.set("selected_restaurant", data.id, {
+        path: "/",
+        httpOnly: true,
+        sameSite: "lax",
+      });
       revalidatePath("/dashboard");
-      redirect("/dashboard");
+      return { restaurant: data as Restaurant };
     }
 
-    // Only retry on unique constraint violation
-    if (!error.code?.includes("23505")) {
+    if (error && !error.code?.includes("23505")) {
       return { error: error.message };
     }
   }
@@ -66,6 +69,7 @@ export async function updateRestaurant(
   } = await supabase.auth.getUser();
   if (!user) return { error: "Not authenticated." };
 
+  const restaurant_id = formData.get("restaurant_id") as string | null;
   const updates: Record<string, string | null> = {};
   const name = formData.get("name") as string | null;
   const description = formData.get("description") as string | null;
@@ -77,14 +81,30 @@ export async function updateRestaurant(
   if (language_default !== null) updates.language_default = language_default;
   if (logo_url !== null) updates.logo_url = logo_url;
 
-  const { error } = await supabase
+  let query = supabase
     .from("restaurants")
     .update(updates)
     .eq("owner_id", user.id);
 
+  if (restaurant_id) {
+    query = query.eq("id", restaurant_id);
+  }
+
+  const { error } = await query;
   if (error) return { error: error.message };
 
   revalidatePath("/dashboard");
   revalidatePath("/dashboard/settings");
   return {};
+}
+
+export async function switchRestaurant(id: string): Promise<void> {
+  const cookieStore = await cookies();
+  cookieStore.set("selected_restaurant", id, {
+    path: "/",
+    httpOnly: true,
+    sameSite: "lax",
+  });
+  revalidatePath("/dashboard");
+  redirect("/dashboard");
 }

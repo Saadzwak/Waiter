@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
-import { getRestaurantByOwner, getLatestInsights } from "@/modules/dashboard/queries";
+import { getSelectedRestaurant, getLatestInsights } from "@/modules/dashboard/queries";
 import type { InsightAnalysis } from "@/modules/dashboard/queries";
 import { InsightsRefreshButton } from "./InsightsRefreshButton";
 
@@ -192,7 +192,7 @@ export default async function InsightsPage() {
   } = await supabase.auth.getUser();
   if (!user) redirect("/login");
 
-  const restaurant = await getRestaurantByOwner(user.id);
+  const restaurant = await getSelectedRestaurant(user.id);
   if (!restaurant) redirect("/dashboard/onboarding");
 
   const latest = await getLatestInsights(restaurant.id);

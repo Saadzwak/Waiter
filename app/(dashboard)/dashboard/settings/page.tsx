@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
-import { getRestaurantByOwner } from "@/modules/dashboard/queries";
+import { getSelectedRestaurant } from "@/modules/dashboard/queries";
 import { SettingsForms } from "./SettingsForms";
 
 export const metadata = { title: "Settings — AIWaiter" };
@@ -12,7 +12,7 @@ export default async function SettingsPage() {
   } = await supabase.auth.getUser();
   if (!user) redirect("/login");
 
-  const restaurant = await getRestaurantByOwner(user.id);
+  const restaurant = await getSelectedRestaurant(user.id);
   if (!restaurant) redirect("/dashboard/onboarding");
 
   return (

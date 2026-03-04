@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import {
-  getRestaurantByOwner,
+  getSelectedRestaurant,
   getDashboardStats,
   getEventTimeSeries,
   getRecentSessions,
@@ -39,7 +39,7 @@ export default async function AnalyticsPage() {
   } = await supabase.auth.getUser();
   if (!user) redirect("/login");
 
-  const restaurant = await getRestaurantByOwner(user.id);
+  const restaurant = await getSelectedRestaurant(user.id);
   if (!restaurant) redirect("/dashboard/onboarding");
 
   const [stats, timeSeries, sessions] = await Promise.all([

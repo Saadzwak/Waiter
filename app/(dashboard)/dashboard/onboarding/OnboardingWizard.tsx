@@ -13,6 +13,7 @@ import {
   Check,
   X,
   Utensils,
+  ArrowRight,
 } from "lucide-react";
 import { createRestaurant, type RestaurantActionState } from "@/app/actions/restaurant";
 import { validateCombination, deleteCombination } from "@/app/actions/menu";
@@ -37,7 +38,7 @@ function SubmitButton({ label }: { label: string }) {
     <button
       type="submit"
       disabled={pending}
-      className="w-full inline-flex items-center justify-center gap-2 rounded-2xl bg-gray-900 px-5 py-2.5 text-sm font-medium text-white hover:bg-gray-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+      className="w-full inline-flex items-center justify-center gap-2 rounded-2xl bg-gray-900 px-5 py-3 text-sm font-medium text-white hover:bg-gray-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
     >
       {pending && <Loader2 className="w-4 h-4 animate-spin" />}
       {label}
@@ -48,19 +49,24 @@ function SubmitButton({ label }: { label: string }) {
 
 function StepIndicator({ current, total }: { current: number; total: number }) {
   return (
-    <div className="flex items-center justify-center gap-2 mb-8">
-      {Array.from({ length: total }).map((_, i) => (
-        <div
-          key={i}
-          className={`h-1.5 rounded-full transition-all duration-300 ${
-            i < current
-              ? "w-6 bg-gray-900"
-              : i === current
-              ? "w-8 bg-gray-900"
-              : "w-6 bg-gray-200"
-          }`}
-        />
-      ))}
+    <div className="flex flex-col items-center gap-3 mb-8">
+      <p className="text-xs font-medium text-gray-400">
+        Step {current} of {total}
+      </p>
+      <div className="flex items-center gap-2">
+        {Array.from({ length: total }).map((_, i) => (
+          <div
+            key={i}
+            className={`h-1.5 rounded-full transition-all duration-300 ${
+              i < current
+                ? "w-6 bg-gray-900"
+                : i === current - 1
+                ? "w-8 bg-gray-900"
+                : "w-6 bg-gray-200"
+            }`}
+          />
+        ))}
+      </div>
     </div>
   );
 }
@@ -68,12 +74,13 @@ function StepIndicator({ current, total }: { current: number; total: number }) {
 type Props = { initialRestaurant: Restaurant | null };
 
 export function OnboardingWizard({ initialRestaurant }: Props) {
-  const [step, setStep] = useState<1 | 2 | 3 | 4>(initialRestaurant ? 2 : 1);
+  const [step, setStep] = useState<1 | 2 | 3 | 4>(1);
   const [restaurant, setRestaurant] = useState<Restaurant | null>(initialRestaurant);
+  const [menuUploaded, setMenuUploaded] = useState(false);
 
   return (
-    <div className="bg-white rounded-2xl border border-gray-200 p-6 shadow-sm">
-      <StepIndicator current={step - 1} total={4} />
+    <div className="bg-white rounded-2xl border border-gray-200 p-6 md:p-8 shadow-sm">
+      <StepIndicator current={step} total={4} />
       {step === 1 && (
         <StepRestaurantInfo
           onSuccess={(r) => {
@@ -85,7 +92,10 @@ export function OnboardingWizard({ initialRestaurant }: Props) {
       {step === 2 && restaurant && (
         <StepMenuUpload
           restaurant={restaurant}
-          onNext={() => setStep(3)}
+          onNext={(uploaded) => {
+            setMenuUploaded(uploaded);
+            setStep(uploaded ? 3 : 4);
+          }}
         />
       )}
       {step === 3 && restaurant && (
@@ -111,24 +121,22 @@ function StepRestaurantInfo({
     {}
   );
 
-  // createRestaurant redirects on success — but if it returns slug we advance locally
-  // In practice, the Server Action redirects to /dashboard after creation.
-  // We handle the case where we want to stay in the wizard instead.
-  // Solution: use a wrapper that prevents redirect by having the action return the slug,
-  // then we advance the wizard. We'll rely on the redirect behavior — the page will
-  // reload and the layout will see the restaurant exists.
-  // For a smoother UX we don't redirect in the action — we handle it here.
+  useEffect(() => {
+    if (state.restaurant) {
+      onSuccess(state.restaurant);
+    }
+  }, [state.restaurant, onSuccess]);
 
   return (
     <div>
-      <h2 className="text-base font-semibold text-gray-900 mb-1">
+      <h2 className="text-lg font-semibold text-gray-900 mb-1">
         Your restaurant
       </h2>
-      <p className="text-sm text-gray-500 mb-5">
-        This will be your AI waiter&apos;s identity.
+      <p className="text-sm text-gray-500 mb-6">
+        Give your AI waiter an identity. You can add more details in Settings later.
       </p>
 
-      <form action={formAction} className="space-y-4">
+      <form action={formAction} className="space-y-5">
         <div className="space-y-1.5">
           <label htmlFor="name" className="block text-sm font-medium text-gray-700">
             Restaurant name <span className="text-red-400">*</span>
@@ -140,20 +148,7 @@ function StepRestaurantInfo({
             required
             autoFocus
             placeholder="e.g. Le Comptoir"
-            className="w-full rounded-2xl border border-gray-200 bg-gray-50 px-4 py-2.5 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-gray-900/10 focus:border-gray-300 transition-colors"
-          />
-        </div>
-
-        <div className="space-y-1.5">
-          <label htmlFor="description" className="block text-sm font-medium text-gray-700">
-            Short description
-          </label>
-          <input
-            id="description"
-            name="description"
-            type="text"
-            placeholder="e.g. Traditional French bistrot in Paris"
-            className="w-full rounded-2xl border border-gray-200 bg-gray-50 px-4 py-2.5 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-gray-900/10 focus:border-gray-300 transition-colors"
+            className="w-full rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-gray-900/10 focus:border-gray-300 transition-colors"
           />
         </div>
 
@@ -168,7 +163,7 @@ function StepRestaurantInfo({
             id="language_default"
             name="language_default"
             defaultValue="en"
-            className="w-full rounded-2xl border border-gray-200 bg-gray-50 px-4 py-2.5 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-gray-900/10 focus:border-gray-300 transition-colors appearance-none"
+            className="w-full rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-gray-900/10 focus:border-gray-300 transition-colors appearance-none"
           >
             {LANGUAGES.map((l) => (
               <option key={l.value} value={l.value}>
@@ -200,13 +195,12 @@ function StepMenuUpload({
   onNext,
 }: {
   restaurant: Restaurant;
-  onNext: () => void;
+  onNext: (uploaded: boolean) => void;
 }) {
   const [status, setStatus] = useState<JobStatus>("idle");
   const [errorMsg, setErrorMsg] = useState("");
   const [jobId, setJobId] = useState<string | null>(null);
 
-  // Poll ingestion job status via Supabase Realtime
   useEffect(() => {
     if (!jobId) return;
     const supabase = createClient();
@@ -288,20 +282,34 @@ function StepMenuUpload({
 
   return (
     <div>
-      <h2 className="text-base font-semibold text-gray-900 mb-1">
+      <h2 className="text-lg font-semibold text-gray-900 mb-1">
         Upload your menu
       </h2>
-      <p className="text-sm text-gray-500 mb-5">
-        Upload a PDF or photo. Our AI will extract and structure all the dishes
-        automatically.
+      <p className="text-sm text-gray-500 mb-4">
+        Upload a PDF or photo. Our AI structures everything automatically.
       </p>
 
+      {/* AI preview */}
+      <div className="rounded-2xl border border-gray-100 bg-gray-50 px-4 py-3 mb-5 space-y-1.5">
+        <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
+          What our AI extracts
+        </p>
+        {[
+          "Dish names, descriptions & prices",
+          "Categories, allergens & dietary tags",
+          "Multilingual embeddings for instant RAG",
+        ].map((item) => (
+          <div key={item} className="flex items-start gap-2">
+            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500 mt-0.5 shrink-0" />
+            <span className="text-xs text-gray-600">{item}</span>
+          </div>
+        ))}
+      </div>
+
       {status === "idle" || status === "error" ? (
-        <label className="flex flex-col items-center justify-center gap-3 w-full h-36 rounded-2xl border-2 border-dashed border-gray-200 cursor-pointer hover:border-gray-300 hover:bg-gray-50 transition-colors">
-          <Upload className="w-6 h-6 text-gray-300" />
-          <span className="text-sm text-gray-400">
-            PDF or image — click to browse
-          </span>
+        <label className="flex flex-col items-center justify-center gap-3 w-full h-40 rounded-2xl border-2 border-dashed border-gray-200 cursor-pointer hover:border-gray-300 hover:bg-gray-50 transition-colors">
+          <Upload className="w-7 h-7 text-gray-300" />
+          <span className="text-sm text-gray-400">PDF or image — click to browse</span>
           <input
             type="file"
             accept=".pdf,image/*"
@@ -310,20 +318,20 @@ function StepMenuUpload({
           />
         </label>
       ) : status === "uploading" ? (
-        <div className="flex flex-col items-center justify-center gap-3 h-36 rounded-2xl border border-gray-100 bg-gray-50">
+        <div className="flex flex-col items-center justify-center gap-3 h-40 rounded-2xl border border-gray-100 bg-gray-50">
           <Loader2 className="w-6 h-6 text-gray-400 animate-spin" />
           <p className="text-sm text-gray-500">Uploading…</p>
         </div>
       ) : status === "processing" ? (
-        <div className="flex flex-col items-center justify-center gap-3 h-36 rounded-2xl border border-gray-100 bg-gray-50">
+        <div className="flex flex-col items-center justify-center gap-3 h-40 rounded-2xl border border-gray-100 bg-gray-50">
           <Loader2 className="w-6 h-6 text-gray-400 animate-spin" />
           <p className="text-sm text-gray-500">Analysing your menu…</p>
           <p className="text-xs text-gray-400">This usually takes 15–30 seconds</p>
         </div>
       ) : (
-        <div className="flex flex-col items-center justify-center gap-3 h-36 rounded-2xl border border-green-100 bg-green-50">
-          <CheckCircle2 className="w-6 h-6 text-green-500" />
-          <p className="text-sm text-green-700 font-medium">Menu imported successfully</p>
+        <div className="flex flex-col items-center justify-center gap-3 h-40 rounded-2xl border border-emerald-100 bg-emerald-50">
+          <CheckCircle2 className="w-7 h-7 text-emerald-500" />
+          <p className="text-sm text-emerald-700 font-medium">Menu imported successfully</p>
         </div>
       )}
 
@@ -334,17 +342,17 @@ function StepMenuUpload({
         </p>
       )}
 
-      <div className="mt-5 flex flex-col gap-2">
+      <div className="mt-6 flex flex-col gap-2">
         {status === "done" && (
           <button
-            onClick={onNext}
-            className="w-full inline-flex items-center justify-center gap-2 rounded-2xl bg-gray-900 px-5 py-2.5 text-sm font-medium text-white hover:bg-gray-700 transition-colors"
+            onClick={() => onNext(true)}
+            className="w-full inline-flex items-center justify-center gap-2 rounded-2xl bg-gray-900 px-5 py-3 text-sm font-medium text-white hover:bg-gray-700 transition-colors"
           >
             Continue <ChevronRight className="w-4 h-4" />
           </button>
         )}
         <button
-          onClick={onNext}
+          onClick={() => onNext(false)}
           className="w-full inline-flex items-center justify-center rounded-2xl border border-gray-200 px-5 py-2.5 text-sm font-medium text-gray-500 hover:bg-gray-50 transition-colors"
         >
           Skip for now
@@ -370,7 +378,6 @@ function StepCombinations({
   useEffect(() => {
     let cancelled = false;
     async function poll() {
-      // Poll until combos appear (generated async after menu ingestion)
       for (let i = 0; i < 10; i++) {
         const res = await fetch(
           `/api/combinations?restaurantId=${restaurant.id}`
@@ -389,7 +396,9 @@ function StepCombinations({
       if (!cancelled) setLoading(false);
     }
     poll();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [restaurant.id]);
 
   function handleValidate(id: string) {
@@ -406,12 +415,12 @@ function StepCombinations({
 
   return (
     <div>
-      <h2 className="text-base font-semibold text-gray-900 mb-1">
+      <h2 className="text-lg font-semibold text-gray-900 mb-1">
         Meal combinations
       </h2>
       <p className="text-sm text-gray-500 mb-5">
         Our AI has crafted these combos from your menu. Validate the ones you
-        love — they&apos;ll be highlighted to customers.
+        love — they&apos;ll be suggested to customers.
       </p>
 
       {loading ? (
@@ -423,12 +432,11 @@ function StepCombinations({
         <div className="flex flex-col items-center justify-center gap-2 h-40 rounded-2xl border border-gray-100 bg-gray-50 text-center px-6">
           <Utensils className="w-5 h-5 text-gray-300" />
           <p className="text-sm text-gray-400">
-            No combinations yet. Upload your menu first, or skip and come back
-            later.
+            No combinations yet. Upload your menu first, or skip and come back later.
           </p>
         </div>
       ) : (
-        <div className="space-y-2.5 max-h-80 overflow-y-auto pr-1">
+        <div className="space-y-2.5 max-h-72 overflow-y-auto pr-1">
           {combos.map((combo) => (
             <div
               key={combo.id}
@@ -485,10 +493,10 @@ function StepCombinations({
         </div>
       )}
 
-      <div className="mt-5 flex flex-col gap-2">
+      <div className="mt-6 flex flex-col gap-2">
         <button
           onClick={onNext}
-          className="w-full inline-flex items-center justify-center gap-2 rounded-2xl bg-gray-900 px-5 py-2.5 text-sm font-medium text-white hover:bg-gray-700 transition-colors"
+          className="w-full inline-flex items-center justify-center gap-2 rounded-2xl bg-gray-900 px-5 py-3 text-sm font-medium text-white hover:bg-gray-700 transition-colors"
         >
           Save &amp; Continue <ChevronRight className="w-4 h-4" />
         </button>
@@ -496,7 +504,7 @@ function StepCombinations({
           onClick={onNext}
           className="w-full inline-flex items-center justify-center rounded-2xl border border-gray-200 px-5 py-2.5 text-sm font-medium text-gray-500 hover:bg-gray-50 transition-colors"
         >
-          Skip for now →
+          Skip for now
         </button>
       </div>
     </div>
@@ -511,56 +519,83 @@ function StepDone({ restaurant }: { restaurant: Restaurant }) {
       ? `${window.location.origin}/${restaurant.slug}`
       : `https://yoursite.com/${restaurant.slug}`;
 
-  const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?data=${encodeURIComponent(url)}&size=180x180&bgcolor=ffffff&color=111111&margin=12`;
+  const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?data=${encodeURIComponent(url)}&size=220x220&bgcolor=ffffff&color=111111&margin=12`;
+
+  const nextSteps = [
+    {
+      label: "Print the QR code",
+      detail: "Download and print — A6 or smaller works great.",
+    },
+    {
+      label: "Place it on your tables",
+      detail: "A small tent card or sticker at each table.",
+    },
+    {
+      label: "Add chef notes",
+      detail: "Enrich dishes with stories, tips & daily specials.",
+    },
+  ];
 
   return (
     <div className="text-center">
-      <div className="w-12 h-12 rounded-2xl bg-gray-50 border border-gray-100 flex items-center justify-center mx-auto mb-4">
-        <CheckCircle2 className="w-6 h-6 text-gray-900" />
+      <div className="w-14 h-14 rounded-2xl bg-emerald-50 border border-emerald-100 flex items-center justify-center mx-auto mb-4">
+        <CheckCircle2 className="w-7 h-7 text-emerald-600" />
       </div>
-      <h2 className="text-base font-semibold text-gray-900 mb-1">
+      <h2 className="text-lg font-semibold text-gray-900 mb-1">
         Your AI waiter is ready
       </h2>
-      <p className="text-sm text-gray-500 mb-6">
-        Print the QR code and place it on your tables.
+      <p className="text-sm text-gray-500 mb-7">
+        Your restaurant is live. Here&apos;s how to get started.
       </p>
 
       {/* QR Code */}
-      <div className="inline-flex flex-col items-center gap-3 mb-6">
+      <div className="inline-flex flex-col items-center gap-3 mb-7">
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
           src={qrUrl}
           alt="QR Code"
-          className="w-44 h-44 rounded-2xl border border-gray-100"
+          className="w-52 h-52 rounded-2xl border border-gray-100 shadow-sm"
         />
-        <a
-          href={qrUrl}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="text-xs text-gray-400 hover:text-gray-600 flex items-center gap-1"
-        >
-          <QrCode className="w-3 h-3" /> Download QR
-        </a>
+        <div className="flex items-center gap-4">
+          <a
+            href={`/${restaurant.slug}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-xs text-gray-400 hover:text-gray-600 flex items-center gap-1 transition-colors"
+          >
+            <ExternalLink className="w-3 h-3" /> Test it live
+          </a>
+          <a
+            href={qrUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-xs text-gray-400 hover:text-gray-600 flex items-center gap-1 transition-colors"
+          >
+            <QrCode className="w-3 h-3" /> Download QR
+          </a>
+        </div>
       </div>
 
-      {/* Test link */}
-      <div className="bg-gray-50 rounded-xl px-4 py-3 mb-6 flex items-center justify-between gap-2">
-        <span className="text-xs text-gray-500 truncate">/{restaurant.slug}</span>
-        <a
-          href={`/${restaurant.slug}`}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="shrink-0 text-xs font-medium text-gray-700 flex items-center gap-1 hover:underline"
-        >
-          Test it <ExternalLink className="w-3 h-3" />
-        </a>
+      {/* Next steps */}
+      <div className="text-left space-y-3 mb-7">
+        {nextSteps.map(({ label, detail }, i) => (
+          <div key={label} className="flex items-start gap-3">
+            <div className="w-7 h-7 rounded-xl bg-gray-100 flex items-center justify-center shrink-0 mt-0.5">
+              <span className="text-xs font-semibold text-gray-500">{i + 1}</span>
+            </div>
+            <div>
+              <p className="text-sm font-medium text-gray-800">{label}</p>
+              <p className="text-xs text-gray-400 mt-0.5">{detail}</p>
+            </div>
+          </div>
+        ))}
       </div>
 
       <a
         href="/dashboard"
-        className="w-full inline-flex items-center justify-center gap-2 rounded-2xl bg-gray-900 px-5 py-2.5 text-sm font-medium text-white hover:bg-gray-700 transition-colors"
+        className="w-full inline-flex items-center justify-center gap-2 rounded-2xl bg-gray-900 px-5 py-3 text-sm font-medium text-white hover:bg-gray-700 transition-colors"
       >
-        Go to dashboard
+        Go to dashboard <ArrowRight className="w-4 h-4" />
       </a>
     </div>
   );

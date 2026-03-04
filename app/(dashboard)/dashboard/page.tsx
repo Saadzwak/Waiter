@@ -2,7 +2,7 @@ import { redirect } from "next/navigation";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import {
-  getRestaurantByOwner,
+  getSelectedRestaurant,
   getDashboardStats,
   getRecentSessions,
 } from "@/modules/dashboard/queries";
@@ -46,7 +46,7 @@ export default async function DashboardPage() {
   } = await supabase.auth.getUser();
   if (!user) redirect("/login");
 
-  const restaurant = await getRestaurantByOwner(user.id);
+  const restaurant = await getSelectedRestaurant(user.id);
   if (!restaurant) redirect("/dashboard/onboarding");
 
   const [stats, sessions] = await Promise.all([

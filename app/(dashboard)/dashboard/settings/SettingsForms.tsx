@@ -138,6 +138,7 @@ function RestaurantInfoForm({ restaurant }: { restaurant: Restaurant }) {
 
   return (
     <form action={formAction} className="space-y-4">
+      <input type="hidden" name="restaurant_id" value={restaurant.id} />
       <div className="space-y-1.5">
         <label htmlFor="name" className="block text-sm font-medium text-gray-700">
           Name
@@ -246,6 +247,7 @@ function LogoUploadForm({ restaurant }: { restaurant: Restaurant }) {
 
     const fd = new FormData();
     fd.append("logo_url", urlData.publicUrl);
+    fd.append("restaurant_id", restaurant.id);
     await updateRestaurant({}, fd);
 
     setUploading(false);

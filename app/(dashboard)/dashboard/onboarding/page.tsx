@@ -1,6 +1,5 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
-import { getRestaurantByOwner } from "@/modules/dashboard/queries";
 import { OnboardingWizard } from "./OnboardingWizard";
 
 export const metadata = { title: "Set up your restaurant — AIWaiter" };
@@ -12,9 +11,7 @@ export default async function OnboardingPage() {
   } = await supabase.auth.getUser();
   if (!user) redirect("/login");
 
-  // If they already have a restaurant, skip to step 2
-  const restaurant = await getRestaurantByOwner(user.id);
-
+  // Always force step 1 — each onboarding session creates a new restaurant
   return (
     <div className="min-h-screen bg-gray-50 flex items-start justify-center px-4 pt-16 pb-16">
       <div className="w-full max-w-lg">
@@ -26,7 +23,7 @@ export default async function OnboardingPage() {
             Let&apos;s set up your restaurant
           </h1>
         </div>
-        <OnboardingWizard initialRestaurant={restaurant} />
+        <OnboardingWizard initialRestaurant={null} />
       </div>
     </div>
   );

@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
+import { getSelectedRestaurantId } from "@/lib/restaurant-context";
 import type { Restaurant, MenuCategory, MenuItem } from "@/types";
 
 export type DashboardStats = {
@@ -41,6 +42,45 @@ export async function getRestaurantByOwner(
     .eq("owner_id", userId)
     .maybeSingle();
   return data;
+}
+
+export async function getRestaurantsByOwner(
+  userId: string
+): Promise<Restaurant[]> {
+  const supabase = await createClient();
+  const { data } = await supabase
+    .from("restaurants")
+    .select("*")
+    .eq("owner_id", userId)
+    .order("created_at");
+  return (data ?? []) as Restaurant[];
+}
+
+export async function getSelectedRestaurant(
+  userId: string
+): Promise<Restaurant | null> {
+  const selectedId = await getSelectedRestaurantId();
+  const supabase = await createClient();
+
+  if (selectedId) {
+    const { data } = await supabase
+      .from("restaurants")
+      .select("*")
+      .eq("id", selectedId)
+      .eq("owner_id", userId)
+      .maybeSingle();
+    if (data) return data as Restaurant;
+  }
+
+  // Fallback to first restaurant
+  const { data } = await supabase
+    .from("restaurants")
+    .select("*")
+    .eq("owner_id", userId)
+    .order("created_at")
+    .limit(1)
+    .maybeSingle();
+  return data as Restaurant | null;
 }
 
 export async function getDashboardStats(

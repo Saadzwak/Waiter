@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
-import { getRestaurantByOwner, getMenuWithCategories } from "@/modules/dashboard/queries";
+import { getSelectedRestaurant, getMenuWithCategories } from "@/modules/dashboard/queries";
 import { ServiceMode } from "./ServiceMode";
 
 export const metadata = { title: "Service — AIWaiter" };
@@ -12,7 +12,7 @@ export default async function ServicePage() {
   } = await supabase.auth.getUser();
   if (!user) redirect("/login");
 
-  const restaurant = await getRestaurantByOwner(user.id);
+  const restaurant = await getSelectedRestaurant(user.id);
   if (!restaurant) redirect("/dashboard/onboarding");
 
   const { categories, items } = await getMenuWithCategories(restaurant.id);

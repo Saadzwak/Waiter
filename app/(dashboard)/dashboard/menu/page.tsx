@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
-import { getRestaurantByOwner, getMenuWithCategories } from "@/modules/dashboard/queries";
+import { getSelectedRestaurant, getMenuWithCategories } from "@/modules/dashboard/queries";
 import { MenuUploader } from "./MenuUploader";
 import { MenuEditor } from "./MenuEditor";
 
@@ -13,7 +13,7 @@ export default async function MenuPage() {
   } = await supabase.auth.getUser();
   if (!user) redirect("/login");
 
-  const restaurant = await getRestaurantByOwner(user.id);
+  const restaurant = await getSelectedRestaurant(user.id);
   if (!restaurant) redirect("/dashboard/onboarding");
 
   const { categories, items } = await getMenuWithCategories(restaurant.id);
