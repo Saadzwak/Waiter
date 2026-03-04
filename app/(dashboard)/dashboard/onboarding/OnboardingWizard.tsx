@@ -393,14 +393,14 @@ function StepCombinations({
   }, [restaurant.id]);
 
   function handleValidate(id: string) {
-    startTransition(() => validateCombination(id));
+    startTransition(() => void validateCombination(id));
     setCombos((prev) =>
       prev.map((c) => (c.id === id ? { ...c, validated: true } : c))
     );
   }
 
   function handleDelete(id: string) {
-    startTransition(() => deleteCombination(id));
+    startTransition(() => void deleteCombination(id));
     setCombos((prev) => prev.filter((c) => c.id !== id));
   }
 
