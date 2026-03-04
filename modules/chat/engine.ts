@@ -138,7 +138,7 @@ export async function buildChatStream({
 
   const systemPrompt = buildSystemPrompt(restaurantName, relevantItems, undefined, userLanguage);
 
-  return streamText({
+  const stream = streamText({
     model: aiSdkOpenai("gpt-4o"),
     system: systemPrompt,
     messages: await convertToModelMessages(messages),
@@ -157,4 +157,18 @@ export async function buildChatStream({
       },
     },
   });
+
+  return {
+    stream,
+    analytics: {
+      userLanguage,
+      userQuery: lastText,
+      matchedItems: relevantItems.map((i) => ({
+        id: i.id,
+        name: i.name,
+        similarity: i.similarity,
+      })),
+      topSimilarity: relevantItems[0]?.similarity ?? 0,
+    },
+  };
 }

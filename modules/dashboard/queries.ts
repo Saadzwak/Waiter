@@ -195,3 +195,91 @@ export async function getIngestionJobs(
     .limit(10);
   return (data ?? []) as IngestionJob[];
 }
+
+// ─── Insights ─────────────────────────────────────────────────────────────────
+
+export type InsightAnalysis = {
+  summary: string;
+  languages: Array<{ code: string; name: string; count: number; pct: number }>;
+  top_items: Array<{ name: string; count: number }>;
+  dietary_signals: Array<{ signal: string; count: number }>;
+  peak_hours: Array<{ hour: number; count: number }>;
+  gaps: string[];
+  recommendations: string[];
+};
+
+export type InsightRow = {
+  id: string;
+  restaurant_id: string;
+  analysis_date: string;
+  period: string;
+  event_count: number;
+  analysis: InsightAnalysis;
+  created_at: string;
+};
+
+export async function getLatestInsights(
+  restaurantId: string
+): Promise<InsightRow | null> {
+  const supabase = await createClient();
+  const { data } = await supabase
+    .from("insights")
+    .select("*")
+    .eq("restaurant_id", restaurantId)
+    .order("analysis_date", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  return data as InsightRow | null;
+}
+
+export async function getInsightsHistory(
+  restaurantId: string,
+  limit = 30
+): Promise<InsightRow[]> {
+  const supabase = await createClient();
+  const { data } = await supabase
+    .from("insights")
+    .select("*")
+    .eq("restaurant_id", restaurantId)
+    .order("analysis_date", { ascending: false })
+    .limit(limit);
+  return (data ?? []) as InsightRow[];
+}
+
+// ─── Meal Combinations ────────────────────────────────────────────────────────
+
+export type MealCombination = {
+  id: string;
+  restaurant_id: string;
+  name: string;
+  description: string | null;
+  item_ids: string[];
+  item_names: string[];
+  validated: boolean;
+  created_at: string;
+};
+
+export async function getUnvalidatedCombinations(
+  restaurantId: string
+): Promise<MealCombination[]> {
+  const supabase = await createClient();
+  const { data } = await supabase
+    .from("meal_combinations")
+    .select("*")
+    .eq("restaurant_id", restaurantId)
+    .eq("validated", false)
+    .order("created_at", { ascending: false });
+  return (data ?? []) as MealCombination[];
+}
+
+export async function getAllCombinations(
+  restaurantId: string
+): Promise<MealCombination[]> {
+  const supabase = await createClient();
+  const { data } = await supabase
+    .from("meal_combinations")
+    .select("*")
+    .eq("restaurant_id", restaurantId)
+    .order("created_at", { ascending: false });
+  return (data ?? []) as MealCombination[];
+}

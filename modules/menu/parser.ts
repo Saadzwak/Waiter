@@ -1,6 +1,7 @@
 import { openai, MODELS } from "@/lib/openai";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { embedMenuItem } from "@/modules/menu/embeddings";
+import { generateMealCombinations } from "@/modules/menu/combinations";
 import { PDFParse } from "pdf-parse";
 
 type ParsedItem = {
@@ -162,6 +163,26 @@ export async function ingestMenu(
     }
 
     await saveMenu(restaurantId, menu);
+
+    // Generate meal combinations in background — failure must not fail the ingestion
+    supabase
+      .from("menu_items")
+      .select("id, name, tags")
+      .eq("restaurant_id", restaurantId)
+      .then(({ data: savedItems }) => {
+        if (savedItems && savedItems.length >= 3) {
+          return generateMealCombinations(
+            restaurantId,
+            savedItems.map((i) => ({
+              id: i.id,
+              name: i.name,
+              category: null,
+              tags: (i.tags as string[]) ?? [],
+            }))
+          );
+        }
+      })
+      .catch(console.error);
 
     await supabase
       .from("ingestion_jobs")

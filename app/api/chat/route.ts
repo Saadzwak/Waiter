@@ -17,21 +17,24 @@ export async function POST(req: NextRequest) {
     return new Response("Restaurant not found", { status: 404 });
   }
 
-  if (sessionId) {
-    trackEvent({
-      event: "message_sent",
-      restaurant_id: restaurant.id,
-      session_id: sessionId,
-      properties: { message_count: messages.length },
-    }).catch(console.error);
-  }
-
-  const result = await buildChatStream({
+  const { stream, analytics } = await buildChatStream({
     restaurantId: restaurant.id,
     restaurantName: restaurant.name,
     menuLanguage: restaurant.language_default,
     messages,
   });
 
-  return result.toUIMessageStreamResponse();
+  trackEvent({
+    event: "message_sent",
+    restaurant_id: restaurant.id,
+    session_id: sessionId ?? "",
+    properties: {
+      ...analytics,
+      hour: new Date().getHours(),
+      day_of_week: new Date().getDay(),
+      message_index: messages.length,
+    },
+  }).catch(console.error);
+
+  return stream.toUIMessageStreamResponse();
 }

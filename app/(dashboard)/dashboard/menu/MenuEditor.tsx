@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useState, useTransition, useRef, useCallback } from "react";
+import { useActionState, useState, useTransition, useRef, useCallback, useEffect } from "react";
 import { useFormStatus } from "react-dom";
 import {
   ChevronDown,
@@ -17,6 +17,8 @@ import {
   Square,
   CheckCircle2,
   RefreshCw,
+  Utensils,
+  X,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
@@ -28,9 +30,12 @@ import {
   deleteItem,
   toggleItemAvailability,
   reorderCategories,
+  validateCombination,
+  deleteCombination,
   type MenuActionState,
 } from "@/app/actions/menu";
 import type { MenuCategory, MenuItem, MenuTag } from "@/types";
+import type { MealCombination } from "@/modules/dashboard/queries";
 
 // ─── Tag config ──────────────────────────────────────────────────────────────
 
@@ -100,6 +105,127 @@ type Props = {
   initialItems: MenuItem[];
 };
 
+// ─── Combinations section ─────────────────────────────────────────────────────
+
+function CombinationsSection({ restaurantId }: { restaurantId: string }) {
+  const [combos, setCombos] = useState<MealCombination[]>([]);
+  const [open, setOpen] = useState(false);
+  const [, startTransition] = useTransition();
+
+  useEffect(() => {
+    fetch(`/api/combinations?restaurantId=${restaurantId}`)
+      .then((r) => r.json())
+      .then((data) => setCombos(data as MealCombination[]))
+      .catch(() => {});
+  }, [restaurantId]);
+
+  function handleValidate(id: string) {
+    startTransition(() => validateCombination(id));
+    setCombos((prev) =>
+      prev.map((c) => (c.id === id ? { ...c, validated: true } : c))
+    );
+  }
+
+  function handleDelete(id: string) {
+    startTransition(() => deleteCombination(id));
+    setCombos((prev) => prev.filter((c) => c.id !== id));
+  }
+
+  return (
+    <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden">
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="flex items-center gap-2 w-full px-4 py-3 border-b border-gray-50 text-left"
+      >
+        {open ? (
+          <ChevronDown className="w-4 h-4 text-gray-400 shrink-0" />
+        ) : (
+          <ChevronUp className="w-4 h-4 text-gray-400 shrink-0" />
+        )}
+        <Utensils className="w-3.5 h-3.5 text-gray-400 shrink-0" />
+        <span className="text-sm font-semibold text-gray-900">Meal combinations</span>
+        <span className="text-xs text-gray-400">
+          {combos.filter((c) => c.validated).length} validated · {combos.length} total
+        </span>
+      </button>
+
+      {open && (
+        <div className="p-4">
+          {combos.length === 0 ? (
+            <p className="text-xs text-gray-400 text-center py-4">
+              No combinations yet — they are generated automatically after menu upload.
+            </p>
+          ) : (
+            <div className="space-y-2">
+              {combos.map((combo) => (
+                <div
+                  key={combo.id}
+                  className={cn(
+                    "rounded-xl border p-3 transition-colors",
+                    combo.validated
+                      ? "border-emerald-200 bg-emerald-50"
+                      : "border-gray-100 bg-gray-50"
+                  )}
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <p className="text-xs font-semibold text-gray-900">{combo.name}</p>
+                        {combo.validated ? (
+                          <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-medium text-emerald-700">
+                            <CheckCircle2 className="w-2.5 h-2.5" /> Validated
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center rounded-full bg-gray-200 px-2 py-0.5 text-[10px] font-medium text-gray-500">
+                            Pending
+                          </span>
+                        )}
+                      </div>
+                      {combo.description && (
+                        <p className="text-[11px] text-gray-500 mt-0.5">{combo.description}</p>
+                      )}
+                      <div className="flex flex-wrap gap-1 mt-1.5">
+                        {combo.item_names.map((name) => (
+                          <span
+                            key={name}
+                            className="rounded-full bg-white border border-gray-200 px-2 py-0.5 text-[10px] font-medium text-gray-600"
+                          >
+                            {name}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-0.5 shrink-0">
+                      {!combo.validated && (
+                        <button
+                          onClick={() => handleValidate(combo.id)}
+                          className="p-1.5 rounded-lg text-gray-300 hover:text-emerald-600 hover:bg-emerald-50 transition-colors"
+                          title="Validate"
+                        >
+                          <Check className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                      <button
+                        onClick={() => handleDelete(combo.id)}
+                        className="p-1.5 rounded-lg text-gray-300 hover:text-red-400 hover:bg-red-50 transition-colors"
+                        title="Delete"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Main editor ─────────────────────────────────────────────────────────────
+
 export function MenuEditor({ restaurantId, initialCategories, initialItems }: Props) {
   const [categories, setCategories] = useState(initialCategories);
   const [items, setItems] = useState(initialItems);
@@ -132,6 +258,9 @@ export function MenuEditor({ restaurantId, initialCategories, initialItems }: Pr
 
   return (
     <div className="space-y-3">
+      {/* Combinations */}
+      <CombinationsSection restaurantId={restaurantId} />
+
       {/* Category list */}
       {categories.map((cat, index) => (
         <CategorySection

@@ -6,6 +6,7 @@ import {
   LayoutDashboard,
   UtensilsCrossed,
   BarChart2,
+  Sparkles,
   Settings,
   LogOut,
 } from "lucide-react";
@@ -17,6 +18,7 @@ const NAV_ITEMS = [
   { label: "Overview", href: "/dashboard", icon: LayoutDashboard },
   { label: "Menu", href: "/dashboard/menu", icon: UtensilsCrossed },
   { label: "Analytics", href: "/dashboard/analytics", icon: BarChart2 },
+  { label: "Insights", href: "/dashboard/insights", icon: Sparkles },
   { label: "Settings", href: "/dashboard/settings", icon: Settings },
 ];
 

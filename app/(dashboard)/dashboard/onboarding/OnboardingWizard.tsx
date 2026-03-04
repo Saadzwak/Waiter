@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useState, useEffect } from "react";
+import { useActionState, useState, useEffect, useTransition } from "react";
 import { useFormStatus } from "react-dom";
 import {
   Loader2,
@@ -10,10 +10,15 @@ import {
   Upload,
   QrCode,
   ExternalLink,
+  Check,
+  X,
+  Utensils,
 } from "lucide-react";
 import { createRestaurant, type RestaurantActionState } from "@/app/actions/restaurant";
+import { validateCombination, deleteCombination } from "@/app/actions/menu";
 import { createClient } from "@/lib/supabase/client";
 import type { Restaurant } from "@/types";
+import type { MealCombination } from "@/modules/dashboard/queries";
 
 const LANGUAGES = [
   { value: "en", label: "English" },
@@ -63,12 +68,12 @@ function StepIndicator({ current, total }: { current: number; total: number }) {
 type Props = { initialRestaurant: Restaurant | null };
 
 export function OnboardingWizard({ initialRestaurant }: Props) {
-  const [step, setStep] = useState<1 | 2 | 3>(initialRestaurant ? 2 : 1);
+  const [step, setStep] = useState<1 | 2 | 3 | 4>(initialRestaurant ? 2 : 1);
   const [restaurant, setRestaurant] = useState<Restaurant | null>(initialRestaurant);
 
   return (
     <div className="bg-white rounded-2xl border border-gray-200 p-6 shadow-sm">
-      <StepIndicator current={step - 1} total={3} />
+      <StepIndicator current={step - 1} total={4} />
       {step === 1 && (
         <StepRestaurantInfo
           onSuccess={(r) => {
@@ -83,7 +88,13 @@ export function OnboardingWizard({ initialRestaurant }: Props) {
           onNext={() => setStep(3)}
         />
       )}
-      {step === 3 && restaurant && <StepDone restaurant={restaurant} />}
+      {step === 3 && restaurant && (
+        <StepCombinations
+          restaurant={restaurant}
+          onNext={() => setStep(4)}
+        />
+      )}
+      {step === 4 && restaurant && <StepDone restaurant={restaurant} />}
     </div>
   );
 }
@@ -343,7 +354,156 @@ function StepMenuUpload({
   );
 }
 
-// ─── Step 3: Done ────────────────────────────────────────────────────────────
+// ─── Step 3: Meal combinations ───────────────────────────────────────────────
+
+function StepCombinations({
+  restaurant,
+  onNext,
+}: {
+  restaurant: Restaurant;
+  onNext: () => void;
+}) {
+  const [combos, setCombos] = useState<MealCombination[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [, startTransition] = useTransition();
+
+  useEffect(() => {
+    let cancelled = false;
+    async function poll() {
+      // Poll until combos appear (generated async after menu ingestion)
+      for (let i = 0; i < 10; i++) {
+        const res = await fetch(
+          `/api/combinations?restaurantId=${restaurant.id}`
+        );
+        if (res.ok) {
+          const data = await res.json();
+          if (!cancelled) {
+            setCombos(data as MealCombination[]);
+            setLoading(false);
+            if ((data as MealCombination[]).length > 0) return;
+          }
+        }
+        if (cancelled) return;
+        await new Promise((r) => setTimeout(r, 3000));
+      }
+      if (!cancelled) setLoading(false);
+    }
+    poll();
+    return () => { cancelled = true; };
+  }, [restaurant.id]);
+
+  function handleValidate(id: string) {
+    startTransition(() => validateCombination(id));
+    setCombos((prev) =>
+      prev.map((c) => (c.id === id ? { ...c, validated: true } : c))
+    );
+  }
+
+  function handleDelete(id: string) {
+    startTransition(() => deleteCombination(id));
+    setCombos((prev) => prev.filter((c) => c.id !== id));
+  }
+
+  return (
+    <div>
+      <h2 className="text-base font-semibold text-gray-900 mb-1">
+        Meal combinations
+      </h2>
+      <p className="text-sm text-gray-500 mb-5">
+        Our AI has crafted these combos from your menu. Validate the ones you
+        love — they&apos;ll be highlighted to customers.
+      </p>
+
+      {loading ? (
+        <div className="flex flex-col items-center justify-center gap-3 h-40 rounded-2xl border border-gray-100 bg-gray-50">
+          <Loader2 className="w-5 h-5 text-gray-400 animate-spin" />
+          <p className="text-sm text-gray-400">Generating combinations…</p>
+        </div>
+      ) : combos.length === 0 ? (
+        <div className="flex flex-col items-center justify-center gap-2 h-40 rounded-2xl border border-gray-100 bg-gray-50 text-center px-6">
+          <Utensils className="w-5 h-5 text-gray-300" />
+          <p className="text-sm text-gray-400">
+            No combinations yet. Upload your menu first, or skip and come back
+            later.
+          </p>
+        </div>
+      ) : (
+        <div className="space-y-2.5 max-h-80 overflow-y-auto pr-1">
+          {combos.map((combo) => (
+            <div
+              key={combo.id}
+              className={`rounded-2xl border p-4 transition-colors ${
+                combo.validated
+                  ? "border-emerald-200 bg-emerald-50"
+                  : "border-gray-100 bg-white"
+              }`}
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold text-gray-900 truncate">
+                    {combo.name}
+                  </p>
+                  {combo.description && (
+                    <p className="text-xs text-gray-500 mt-0.5">{combo.description}</p>
+                  )}
+                  <div className="flex flex-wrap gap-1.5 mt-2">
+                    {combo.item_names.map((name) => (
+                      <span
+                        key={name}
+                        className="inline-flex items-center rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-medium text-gray-600"
+                      >
+                        {name}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+                <div className="flex items-center gap-1 shrink-0">
+                  {!combo.validated ? (
+                    <button
+                      onClick={() => handleValidate(combo.id)}
+                      className="p-1.5 rounded-lg text-gray-300 hover:text-emerald-600 hover:bg-emerald-50 transition-colors"
+                      title="Validate"
+                    >
+                      <Check className="w-4 h-4" />
+                    </button>
+                  ) : (
+                    <span className="p-1.5 text-emerald-500">
+                      <CheckCircle2 className="w-4 h-4" />
+                    </span>
+                  )}
+                  <button
+                    onClick={() => handleDelete(combo.id)}
+                    className="p-1.5 rounded-lg text-gray-300 hover:text-red-400 hover:bg-red-50 transition-colors"
+                    title="Delete"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div className="mt-5 flex flex-col gap-2">
+        <button
+          onClick={onNext}
+          className="w-full inline-flex items-center justify-center gap-2 rounded-2xl bg-gray-900 px-5 py-2.5 text-sm font-medium text-white hover:bg-gray-700 transition-colors"
+        >
+          Save &amp; Continue <ChevronRight className="w-4 h-4" />
+        </button>
+        <button
+          onClick={onNext}
+          className="w-full inline-flex items-center justify-center rounded-2xl border border-gray-200 px-5 py-2.5 text-sm font-medium text-gray-500 hover:bg-gray-50 transition-colors"
+        >
+          Skip for now →
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ─── Step 4: Done ────────────────────────────────────────────────────────────
 
 function StepDone({ restaurant }: { restaurant: Restaurant }) {
   const url =

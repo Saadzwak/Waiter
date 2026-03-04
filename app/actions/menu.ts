@@ -206,3 +206,31 @@ export async function toggleItemAvailability(
   revalidatePath("/dashboard/menu");
   return {};
 }
+
+// ─── Meal Combinations ────────────────────────────────────────────────────────
+
+export async function validateCombination(id: string): Promise<MenuActionState> {
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("meal_combinations")
+    .update({ validated: true })
+    .eq("id", id);
+
+  if (error) return { error: error.message };
+  revalidatePath("/dashboard/menu");
+  revalidatePath("/dashboard/onboarding");
+  return {};
+}
+
+export async function deleteCombination(id: string): Promise<MenuActionState> {
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("meal_combinations")
+    .delete()
+    .eq("id", id);
+
+  if (error) return { error: error.message };
+  revalidatePath("/dashboard/menu");
+  revalidatePath("/dashboard/onboarding");
+  return {};
+}
