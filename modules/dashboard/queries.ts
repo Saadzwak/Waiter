@@ -84,16 +84,17 @@ export async function getSelectedRestaurant(
 }
 
 export async function getDashboardStats(
-  restaurantId: string
+  restaurantId: string,
+  days = 30
 ): Promise<DashboardStats> {
   const supabase = await createClient();
-  const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+  const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
 
   const [
     { count: totalSessions },
-    { count: sessions30d },
+    { count: sessionsPeriod },
     { count: totalMenuItems },
-    { data: messages30dData },
+    { data: messagesPeriodData },
   ] = await Promise.all([
     supabase
       .from("chat_sessions")
@@ -103,7 +104,7 @@ export async function getDashboardStats(
       .from("chat_sessions")
       .select("*", { count: "exact", head: true })
       .eq("restaurant_id", restaurantId)
-      .gte("created_at", thirtyDaysAgo),
+      .gte("created_at", since),
     supabase
       .from("menu_items")
       .select("*", { count: "exact", head: true })
@@ -114,19 +115,19 @@ export async function getDashboardStats(
       .select("id")
       .eq("restaurant_id", restaurantId)
       .eq("event", "message_sent")
-      .gte("created_at", thirtyDaysAgo),
+      .gte("created_at", since),
   ]);
 
-  const messages30d = messages30dData?.length ?? 0;
+  const messagesPeriod = messagesPeriodData?.length ?? 0;
   const avgMessagesPerSession =
-    sessions30d && sessions30d > 0
-      ? Math.round(messages30d / sessions30d)
+    sessionsPeriod && sessionsPeriod > 0
+      ? Math.round(messagesPeriod / sessionsPeriod)
       : 0;
 
   return {
     totalSessions: totalSessions ?? 0,
-    sessions30d: sessions30d ?? 0,
-    messages30d,
+    sessions30d: sessionsPeriod ?? 0,
+    messages30d: messagesPeriod,
     totalMenuItems: totalMenuItems ?? 0,
     avgMessagesPerSession,
   };
@@ -159,15 +160,23 @@ export async function getMenuWithCategories(restaurantId: string): Promise<{
 
 export async function getRecentSessions(
   restaurantId: string,
-  limit = 20
+  limit = 20,
+  days?: number
 ): Promise<RecentSession[]> {
   const supabase = await createClient();
-  const { data: sessions } = await supabase
+  let query = supabase
     .from("chat_sessions")
     .select("id, language_detected, created_at")
     .eq("restaurant_id", restaurantId)
     .order("created_at", { ascending: false })
     .limit(limit);
+
+  if (days !== undefined) {
+    const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+    query = query.gte("created_at", since);
+  }
+
+  const { data: sessions } = await query;
 
   if (!sessions || sessions.length === 0) return [];
 
@@ -218,6 +227,35 @@ export async function getEventTimeSeries(
   for (const row of data ?? []) {
     const key = row.created_at.slice(0, 10);
     if (key in buckets) buckets[key]++;
+  }
+
+  return Object.entries(buckets).map(([date, count]) => ({ date, count }));
+}
+
+export async function getEventTimeSeriesHourly(
+  restaurantId: string
+): Promise<EventDataPoint[]> {
+  const supabase = await createClient();
+  const todayStart = new Date();
+  todayStart.setHours(0, 0, 0, 0);
+
+  const { data } = await supabase
+    .from("events")
+    .select("created_at")
+    .eq("restaurant_id", restaurantId)
+    .eq("event", "message_sent")
+    .gte("created_at", todayStart.toISOString())
+    .order("created_at");
+
+  // Pre-fill all 24 hours with 0
+  const buckets: Record<string, number> = {};
+  for (let h = 0; h < 24; h++) {
+    buckets[String(h).padStart(2, "0")] = 0;
+  }
+
+  for (const row of data ?? []) {
+    const hour = String(new Date(row.created_at).getHours()).padStart(2, "0");
+    if (hour in buckets) buckets[hour]++;
   }
 
   return Object.entries(buckets).map(([date, count]) => ({ date, count }));
