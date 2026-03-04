@@ -165,10 +165,12 @@ export async function ingestMenu(
     await saveMenu(restaurantId, menu);
 
     // Generate meal combinations in background — failure must not fail the ingestion
-    supabase
-      .from("menu_items")
-      .select("id, name, tags")
-      .eq("restaurant_id", restaurantId)
+    Promise.resolve(
+      supabase
+        .from("menu_items")
+        .select("id, name, tags")
+        .eq("restaurant_id", restaurantId)
+    )
       .then(({ data: savedItems }) => {
         if (savedItems && savedItems.length >= 3) {
           return generateMealCombinations(
