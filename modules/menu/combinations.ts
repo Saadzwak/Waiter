@@ -14,6 +14,55 @@ type GPTCombo = {
   items: string[];
 };
 
+function normalize(s: string): string {
+  // Lowercase, strip diacritics, collapse whitespace. Keeps the comparison
+  // resilient to minor transcription differences ("bœuf" ↔ "boeuf").
+  return s
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/\p{Diacritic}/gu, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/**
+ * Match a candidate name from GPT against our canonical menu items.
+ *
+ * Strategy, in order:
+ *   1. Exact normalized match.
+ *   2. Candidate is a full-word prefix/suffix of a canonical name
+ *      (e.g. GPT returns "Bourguignon" → match "Bœuf Bourguignon").
+ *   3. Otherwise: no match. We deliberately do NOT do generic substring
+ *      matching — it caused false positives like "Pasta" matching four
+ *      different pasta dishes in the same combo.
+ */
+function findItemId(
+  candidate: string,
+  lookup: Map<string, { id: string; name: string }>
+): { id: string; name: string } | null {
+  const norm = normalize(candidate);
+  if (!norm) return null;
+
+  const exact = lookup.get(norm);
+  if (exact) return exact;
+
+  // Word-boundary prefix/suffix match: only accept if the candidate is a
+  // full word (or sequence of words) of the canonical name.
+  for (const [key, value] of lookup) {
+    const words = key.split(" ");
+    const candWords = norm.split(" ");
+    if (candWords.length > words.length) continue;
+    if (
+      words.slice(0, candWords.length).join(" ") === norm ||
+      words.slice(-candWords.length).join(" ") === norm
+    ) {
+      return value;
+    }
+  }
+
+  return null;
+}
+
 export async function generateMealCombinations(
   restaurantId: string,
   items: ComboItem[]
@@ -47,13 +96,10 @@ Return a JSON object with a "combinations" array.`,
   };
   const combos = parsed.combinations ?? [];
 
-  // Build name→id lookup (lowercase for fuzzy matching)
-  const nameToId: Record<string, string> = {};
-  const nameToOriginal: Record<string, string> = {};
+  // Build a normalized lookup once.
+  const lookup = new Map<string, { id: string; name: string }>();
   for (const item of items) {
-    const key = item.name.toLowerCase();
-    nameToId[key] = item.id;
-    nameToOriginal[key] = item.name;
+    lookup.set(normalize(item.name), { id: item.id, name: item.name });
   }
 
   const supabase = createAdminClient();
@@ -61,23 +107,15 @@ Return a JSON object with a "combinations" array.`,
   for (const combo of combos.slice(0, 8)) {
     const itemIds: string[] = [];
     const itemNames: string[] = [];
+    const seen = new Set<string>();
 
     for (const name of combo.items) {
-      const lower = name.toLowerCase();
-      // Exact match
-      if (nameToId[lower]) {
-        itemIds.push(nameToId[lower]);
-        itemNames.push(nameToOriginal[lower]);
-        continue;
-      }
-      // Partial match
-      const key = Object.keys(nameToId).find(
-        (k) => k.includes(lower) || lower.includes(k)
-      );
-      if (key) {
-        itemIds.push(nameToId[key]);
-        itemNames.push(nameToOriginal[key]);
-      }
+      const match = findItemId(name, lookup);
+      if (!match) continue;
+      if (seen.has(match.id)) continue; // avoid double-counting same dish
+      seen.add(match.id);
+      itemIds.push(match.id);
+      itemNames.push(match.name);
     }
 
     if (itemIds.length >= 2) {

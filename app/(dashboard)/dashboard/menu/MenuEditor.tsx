@@ -19,8 +19,10 @@ import {
   RefreshCw,
   Utensils,
   X,
+  ImageIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { createClient } from "@/lib/supabase/client";
 import {
   createCategory,
   updateCategory,
@@ -32,6 +34,7 @@ import {
   reorderCategories,
   validateCombination,
   deleteCombination,
+  updateItemImage,
   type MenuActionState,
 } from "@/app/actions/menu";
 import type { MenuCategory, MenuItem, MenuTag } from "@/types";
@@ -581,6 +584,8 @@ function ItemRow({
 }) {
   const [editing, setEditing] = useState(false);
   const [voiceOpen, setVoiceOpen] = useState(false);
+  const [imageOpen, setImageOpen] = useState(false);
+  const [imageUrl, setImageUrl] = useState(item.image_url);
   const [available, setAvailable] = useState(item.available);
   const [deleting, setDeleting] = useState(false);
   const [, startTransition] = useTransition();
@@ -612,6 +617,20 @@ function ItemRow({
             )}
           />
         </button>
+
+        {/* Thumbnail */}
+        {imageUrl ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={imageUrl}
+            alt=""
+            className="w-10 h-10 rounded-xl object-cover bg-gray-50 border border-gray-100 shrink-0"
+          />
+        ) : (
+          <div className="w-10 h-10 rounded-xl bg-gray-50 border border-dashed border-gray-200 flex items-center justify-center shrink-0">
+            <ImageIcon className="w-3.5 h-3.5 text-gray-300" />
+          </div>
+        )}
 
         {/* Info */}
         <div className="flex-1 min-w-0">
@@ -653,7 +672,19 @@ function ItemRow({
         {/* Actions */}
         <div className="flex items-center gap-0.5 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
           <button
-            onClick={() => { setVoiceOpen((v) => !v); setEditing(false); }}
+            onClick={() => { setImageOpen((v) => !v); setVoiceOpen(false); setEditing(false); }}
+            className={cn(
+              "p-1.5 rounded-lg transition-colors",
+              imageOpen
+                ? "text-emerald-600 bg-emerald-50"
+                : "text-gray-300 hover:text-emerald-600 hover:bg-emerald-50"
+            )}
+            title={imageUrl ? "Replace photo" : "Add photo"}
+          >
+            <ImageIcon className="w-3.5 h-3.5" />
+          </button>
+          <button
+            onClick={() => { setVoiceOpen((v) => !v); setImageOpen(false); setEditing(false); }}
             className={cn(
               "p-1.5 rounded-lg transition-colors",
               voiceOpen
@@ -729,6 +760,175 @@ function ItemRow({
           />
         </div>
       )}
+
+      {/* Inline image upload */}
+      {imageOpen && (
+        <div className="px-4 pb-4 pt-3 bg-emerald-50/40 border-t border-emerald-100">
+          <ItemImageUpload
+            itemId={item.id}
+            restaurantId={restaurantId}
+            currentUrl={imageUrl}
+            onClose={() => setImageOpen(false)}
+            onSaved={(url) => setImageUrl(url)}
+          />
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Item image upload ───────────────────────────────────────────────────────
+
+const MAX_IMAGE_MB = 5;
+const ACCEPTED_IMAGE = "image/jpeg,image/png,image/webp";
+
+function ItemImageUpload({
+  itemId,
+  restaurantId,
+  currentUrl,
+  onClose,
+  onSaved,
+}: {
+  itemId: string;
+  restaurantId: string;
+  currentUrl: string | null;
+  onClose: () => void;
+  onSaved: (url: string | null) => void;
+}) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [uploading, setUploading] = useState(false);
+  const [error, setError] = useState("");
+  const [preview, setPreview] = useState<string | null>(currentUrl);
+  const [, startTransition] = useTransition();
+
+  async function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+
+    if (!ACCEPTED_IMAGE.split(",").includes(file.type)) {
+      setError("JPG, PNG or WebP only.");
+      return;
+    }
+    if (file.size > MAX_IMAGE_MB * 1024 * 1024) {
+      setError(`Image too large. Max ${MAX_IMAGE_MB} MB.`);
+      return;
+    }
+
+    setError("");
+    setUploading(true);
+
+    // Optimistic preview
+    const localUrl = URL.createObjectURL(file);
+    setPreview(localUrl);
+
+    try {
+      const supabase = createClient();
+      const ext = file.name.split(".").pop() || "jpg";
+      const path = `${restaurantId}/${itemId}-${Date.now()}.${ext}`;
+
+      const { error: uploadError } = await supabase.storage
+        .from("dish-images")
+        .upload(path, file, { upsert: false });
+
+      if (uploadError) throw new Error(uploadError.message);
+
+      const { data } = supabase.storage.from("dish-images").getPublicUrl(path);
+      const publicUrl = data.publicUrl;
+
+      const fd = new FormData();
+      fd.append("id", itemId);
+      fd.append("image_url", publicUrl);
+      const state = await updateItemImage({}, fd);
+      if (state.error) throw new Error(state.error);
+
+      setPreview(publicUrl);
+      onSaved(publicUrl);
+    } catch (err) {
+      setPreview(currentUrl);
+      setError(err instanceof Error ? err.message : "Upload failed.");
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  function handleRemove() {
+    startTransition(async () => {
+      const fd = new FormData();
+      fd.append("id", itemId);
+      fd.append("image_url", "");
+      const state = await updateItemImage({}, fd);
+      if (state.error) {
+        setError(state.error);
+        return;
+      }
+      setPreview(null);
+      onSaved(null);
+    });
+  }
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between">
+        <p className="text-xs font-medium text-emerald-700">Dish photo</p>
+        <button onClick={onClose} className="text-xs text-gray-400 hover:text-gray-600">Close</button>
+      </div>
+
+      <div className="flex items-start gap-3">
+        <div
+          className={cn(
+            "w-20 h-20 rounded-xl bg-white border border-emerald-100 flex items-center justify-center overflow-hidden shrink-0",
+            uploading && "animate-pulse"
+          )}
+        >
+          {preview ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={preview} alt="" className="w-full h-full object-cover" />
+          ) : (
+            <ImageIcon className="w-5 h-5 text-gray-300" />
+          )}
+        </div>
+
+        <div className="flex-1 min-w-0 space-y-1.5">
+          <input
+            ref={inputRef}
+            type="file"
+            accept={ACCEPTED_IMAGE}
+            className="hidden"
+            onChange={handleFile}
+          />
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={() => inputRef.current?.click()}
+              disabled={uploading}
+              className="inline-flex items-center gap-1.5 rounded-xl bg-white border border-emerald-200 px-3 py-1.5 text-xs font-medium text-emerald-700 hover:bg-emerald-50 disabled:opacity-40 transition-colors"
+            >
+              {uploading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <ImageIcon className="w-3.5 h-3.5" />}
+              {uploading ? "Uploading…" : preview ? "Replace" : "Choose photo"}
+            </button>
+            {preview && !uploading && (
+              <button
+                type="button"
+                onClick={handleRemove}
+                className="inline-flex items-center gap-1 rounded-xl px-3 py-1.5 text-xs font-medium text-red-500 hover:text-red-600 hover:bg-red-50 transition-colors"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                Remove
+              </button>
+            )}
+          </div>
+          <p className="text-[11px] text-gray-400">
+            JPG, PNG, WebP — max {MAX_IMAGE_MB} MB. Shown in the chat when this dish is recommended.
+          </p>
+          {error && (
+            <p className="text-xs text-red-500 flex items-center gap-1">
+              <AlertCircle className="w-3 h-3" />
+              {error}
+            </p>
+          )}
+        </div>
+      </div>
     </div>
   );
 }

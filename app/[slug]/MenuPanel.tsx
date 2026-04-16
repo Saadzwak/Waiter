@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect } from "react";
 import { X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { MenuCategory, MenuItem, MenuTag } from "@/types";
@@ -25,6 +26,16 @@ type Props = {
 };
 
 export function MenuPanel({ isOpen, onClose, categories, items }: Props) {
+  // ESC closes the panel — small but expected behavior on desktop.
+  useEffect(() => {
+    if (!isOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [isOpen, onClose]);
+
   const itemsByCategory = items.reduce<Record<string, MenuItem[]>>(
     (acc, item) => {
       const key = item.category_id ?? "uncategorized";
@@ -55,6 +66,9 @@ export function MenuPanel({ isOpen, onClose, categories, items }: Props) {
           "max-h-[80dvh]",
           isOpen ? "translate-y-0" : "translate-y-full"
         )}
+        role="dialog"
+        aria-modal="true"
+        aria-hidden={!isOpen}
       >
         {/* Handle bar */}
         <div className="flex justify-center pt-3 pb-1">
@@ -67,6 +81,7 @@ export function MenuPanel({ isOpen, onClose, categories, items }: Props) {
           <button
             onClick={onClose}
             className="w-8 h-8 rounded-full flex items-center justify-center text-gray-400 hover:text-gray-600 hover:bg-gray-50 transition-colors"
+            aria-label="Close menu"
           >
             <X className="w-4 h-4" />
           </button>
@@ -119,7 +134,16 @@ export function MenuPanel({ isOpen, onClose, categories, items }: Props) {
 
 function MenuItemRow({ item }: { item: MenuItem }) {
   return (
-    <div className="flex items-start justify-between gap-3">
+    <div className="flex items-start gap-3">
+      {item.image_url && (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={item.image_url}
+          alt={item.name}
+          loading="lazy"
+          className="w-16 h-16 rounded-xl object-cover bg-gray-50 border border-gray-100 shrink-0"
+        />
+      )}
       <div className="min-w-0 flex-1">
         <p className="text-sm font-medium text-gray-900">{item.name}</p>
         {item.description && (

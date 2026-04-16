@@ -1,34 +1,26 @@
 import { streamText, convertToModelMessages, stepCountIs } from "ai";
 import { openai as aiSdkOpenai } from "@ai-sdk/openai";
-import OpenAI from "openai";
 import { z } from "zod";
+import { openai } from "@/lib/openai";
 import { generateEmbedding } from "@/modules/menu/embeddings";
-import { buildSystemPrompt } from "@/modules/chat/prompts";
+import { buildSystemPrompt, type PromptItem } from "@/modules/chat/prompts";
 import { createAdminClient } from "@/lib/supabase/admin";
 import type { UIMessage, TextUIPart } from "ai";
 
-const openaiClient = new OpenAI();
-
-type MatchedItem = {
+type MatchedItem = PromptItem & {
   id: string;
-  name: string;
-  description: string | null;
-  price: number | null;
-  currency: string;
-  tags: string[];
-  allergens: string[];
-  pairing_suggestions: string[];
-  chef_notes: string | null;
   similarity: number;
 };
 
+// Items below this cosine similarity are treated as irrelevant and dropped
+// from context to prevent the model from hallucinating around them.
 const SIMILARITY_THRESHOLD = 0.3;
 
 async function detectLanguageAndTranslate(
   userText: string,
   menuLanguage: string
 ): Promise<{ userLanguage: string; queryForEmbedding: string }> {
-  const res = await openaiClient.chat.completions.create({
+  const res = await openai.chat.completions.create({
     model: "gpt-4o-mini",
     response_format: { type: "json_object" },
     max_tokens: 200,
@@ -69,7 +61,7 @@ async function searchRelevantItems(
     match_count: limit,
   });
   if (error) throw error;
-  return data ?? [];
+  return (data ?? []) as MatchedItem[];
 }
 
 async function searchWeb(query: string): Promise<string> {
@@ -143,10 +135,17 @@ export async function buildChatStream({
 
   const allItems = await searchRelevantItems(restaurantId, embedding);
   // Filter out low-confidence matches to prevent hallucination on irrelevant context
-  const relevantItems = allItems.filter((item) => item.similarity >= SIMILARITY_THRESHOLD);
+  const relevantItems = allItems.filter(
+    (item) => item.similarity >= SIMILARITY_THRESHOLD
+  );
   const soldOutItems = unavailableData?.map((i) => i.name) ?? [];
 
-  const systemPrompt = buildSystemPrompt(restaurantName, relevantItems, undefined, userLanguage, soldOutItems);
+  const systemPrompt = buildSystemPrompt({
+    restaurantName,
+    items: relevantItems,
+    userLanguage,
+    soldOutItems,
+  });
 
   const stream = streamText({
     model: aiSdkOpenai("gpt-4o"),

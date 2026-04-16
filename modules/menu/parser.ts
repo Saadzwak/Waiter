@@ -2,6 +2,11 @@ import { openai, MODELS } from "@/lib/openai";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { embedMenuItem } from "@/modules/menu/embeddings";
 import { generateMealCombinations } from "@/modules/menu/combinations";
+import {
+  cropAndSaveDishImage,
+  fetchImageBuffer,
+  type NormalizedBBox,
+} from "@/modules/menu/images";
 import { PDFParse } from "pdf-parse";
 
 type ParsedItem = {
@@ -12,6 +17,7 @@ type ParsedItem = {
   tags: string[];
   allergens: string[];
   pairing_suggestions: string[];
+  photo_bbox?: NormalizedBBox | null;
 };
 
 type ParsedCategory = {
@@ -24,7 +30,7 @@ type ParsedMenu = {
   categories: ParsedCategory[];
 };
 
-const EXTRACTION_PROMPT = `Extract the complete menu from this restaurant document and return a JSON object with this exact structure:
+const TEXT_EXTRACTION_PROMPT = `Extract the complete menu from this restaurant document and return a JSON object with this exact structure:
 {
   "categories": [
     {
@@ -52,6 +58,20 @@ Rules:
 - Default currency to EUR if not specified
 - Set price to null if not listed`;
 
+// For images we additionally ask the model to return a normalized bounding
+// box for dishes that have an associated photo in the image. Coordinates
+// are expressed as fractions of the image (top-left origin, values in [0,1]).
+const IMAGE_EXTRACTION_PROMPT = `${TEXT_EXTRACTION_PROMPT}
+
+Additionally, for EACH item, if and ONLY if there is a clearly visible photograph of that dish somewhere in this image, also return:
+
+  "photo_bbox": { "x": 0.12, "y": 0.08, "width": 0.34, "height": 0.22 }
+
+- All four values MUST be numbers between 0 and 1 representing a fraction of the full image (top-left origin).
+- The box should tightly frame JUST the photo of the dish itself — not its name, price, or decorative text.
+- If the dish has no associated photograph, set "photo_bbox" to null.
+- Never invent a bounding box. Only include one when you can actually see the dish's photo.`;
+
 async function extractMenuFromText(text: string): Promise<ParsedMenu> {
   const response = await openai.chat.completions.create({
     model: MODELS.chat,
@@ -59,7 +79,7 @@ async function extractMenuFromText(text: string): Promise<ParsedMenu> {
     messages: [
       {
         role: "user",
-        content: `${EXTRACTION_PROMPT}\n\nMENU TEXT:\n${text.slice(0, 12000)}`,
+        content: `${TEXT_EXTRACTION_PROMPT}\n\nMENU TEXT:\n${text.slice(0, 12000)}`,
       },
     ],
     max_tokens: 4000,
@@ -79,7 +99,7 @@ async function extractMenuFromImage(imageUrl: string): Promise<ParsedMenu> {
             type: "image_url",
             image_url: { url: imageUrl, detail: "high" },
           },
-          { type: "text", text: EXTRACTION_PROMPT },
+          { type: "text", text: IMAGE_EXTRACTION_PROMPT },
         ],
       },
     ],
@@ -88,8 +108,17 @@ async function extractMenuFromImage(imageUrl: string): Promise<ParsedMenu> {
   return JSON.parse(response.choices[0].message.content ?? "{}") as ParsedMenu;
 }
 
-async function saveMenu(restaurantId: string, menu: ParsedMenu): Promise<void> {
+type SavedItemRef = {
+  id: string;
+  photoBBox: NormalizedBBox | null;
+};
+
+async function saveMenu(
+  restaurantId: string,
+  menu: ParsedMenu
+): Promise<SavedItemRef[]> {
   const supabase = createAdminClient();
+  const saved: SavedItemRef[] = [];
 
   for (const category of menu.categories) {
     const { data: catData, error: catError } = await supabase
@@ -131,8 +160,63 @@ async function saveMenu(restaurantId: string, menu: ParsedMenu): Promise<void> {
         allergens: itemData.allergens,
         pairing_suggestions: itemData.pairing_suggestions,
       });
+
+      saved.push({
+        id: itemData.id,
+        photoBBox: item.photo_bbox ?? null,
+      });
     }
   }
+
+  return saved;
+}
+
+/**
+ * For each item that came with a photo_bbox, crop that region from the
+ * source menu image and store it as the item's image_url. Any individual
+ * failure is logged but never propagated — dish-image extraction is
+ * strictly best-effort.
+ */
+async function extractAndSaveDishPhotos(
+  restaurantId: string,
+  sourceImageUrl: string,
+  saved: SavedItemRef[]
+): Promise<void> {
+  const withPhotos = saved.filter((s) => s.photoBBox);
+  if (withPhotos.length === 0) return;
+
+  let sourceBuffer: Buffer;
+  try {
+    sourceBuffer = await fetchImageBuffer(sourceImageUrl);
+  } catch (err) {
+    console.error("[ingest] failed to fetch source image for cropping", err);
+    return;
+  }
+
+  const supabase = createAdminClient();
+
+  // Run crops in parallel but cap concurrency at 3 to keep memory predictable.
+  const queue = [...withPhotos];
+  const workers = Array.from({ length: Math.min(3, queue.length) }, async () => {
+    while (queue.length > 0) {
+      const next = queue.shift();
+      if (!next || !next.photoBBox) continue;
+      const publicUrl = await cropAndSaveDishImage({
+        restaurantId,
+        itemId: next.id,
+        sourceBuffer,
+        bbox: next.photoBBox,
+      });
+      if (publicUrl) {
+        const { error } = await supabase
+          .from("menu_items")
+          .update({ image_url: publicUrl })
+          .eq("id", next.id);
+        if (error) console.error("[ingest] image_url update failed", error);
+      }
+    }
+  });
+  await Promise.all(workers);
 }
 
 export async function ingestMenu(
@@ -162,9 +246,20 @@ export async function ingestMenu(
       menu = await extractMenuFromImage(fileUrl);
     }
 
-    await saveMenu(restaurantId, menu);
+    const saved = await saveMenu(restaurantId, menu);
 
-    // Generate meal combinations in background — failure must not fail the ingestion
+    // Dish-image extraction — image menus only. Non-blocking: any failure
+    // is swallowed so the ingestion stays "done" even if no photos land.
+    if (fileType === "image") {
+      try {
+        await extractAndSaveDishPhotos(restaurantId, fileUrl, saved);
+      } catch (err) {
+        console.error("[ingest] dish photo extraction failed", err);
+      }
+    }
+
+    // Generate meal combinations in background — failure must not fail the
+    // ingestion. Fire-and-forget with console logging.
     Promise.resolve(
       supabase
         .from("menu_items")

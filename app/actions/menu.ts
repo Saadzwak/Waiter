@@ -1,9 +1,39 @@
 "use server";
 
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
+import { embedMenuItem } from "@/modules/menu/embeddings";
 import { revalidatePath } from "next/cache";
 
 export type MenuActionState = { error?: string };
+
+// Fire-and-forget: an embedding failure must never block the UI. The invariant
+// is that an item either has a fresh embedding or `embedding = null`, in which
+// case it drops out of RAG until re-embedded.
+function scheduleReembed(itemId: string): void {
+  const admin = createAdminClient();
+  // Supabase query builders return a PromiseLike, not a native Promise.
+  // Wrap it so .catch() works reliably.
+  Promise.resolve(
+    admin
+      .from("menu_items")
+      .select("id, name, description, tags, allergens, pairing_suggestions")
+      .eq("id", itemId)
+      .single()
+  )
+    .then(({ data }) => {
+      if (!data) return;
+      return embedMenuItem({
+        id: data.id,
+        name: data.name,
+        description: data.description,
+        tags: data.tags ?? [],
+        allergens: data.allergens ?? [],
+        pairing_suggestions: data.pairing_suggestions ?? [],
+      });
+    })
+    .catch((err) => console.error("[menu-actions] re-embed failed", err));
+}
 
 // ─── Categories ─────────────────────────────────────────────────────────────
 
@@ -168,9 +198,33 @@ export async function updateItem(
       allergens,
       pairing_suggestions,
       chef_notes,
-      // Null out embedding if text changed — will be regenerated on next ingest
+      // Null out embedding if text changed — regenerated just below.
       ...(needsReembed ? { embedding: null } : {}),
     })
+    .eq("id", id);
+
+  if (error) return { error: error.message };
+
+  // Keep RAG consistent: when name or description changed, regenerate the
+  // embedding right away instead of leaving the row out of search.
+  if (needsReembed) scheduleReembed(id);
+
+  revalidatePath("/dashboard/menu");
+  return {};
+}
+
+export async function updateItemImage(
+  _prev: MenuActionState,
+  formData: FormData
+): Promise<MenuActionState> {
+  const supabase = await createClient();
+  const id = formData.get("id") as string;
+  const raw = (formData.get("image_url") as string | null) ?? "";
+  const image_url = raw.trim() === "" ? null : raw.trim();
+
+  const { error } = await supabase
+    .from("menu_items")
+    .update({ image_url })
     .eq("id", id);
 
   if (error) return { error: error.message };

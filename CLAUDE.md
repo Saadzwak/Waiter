@@ -82,9 +82,11 @@ One owner can own multiple restaurants. The active one is tracked in the `select
 2. `POST /api/menu/ingest` verifies ownership, creates an `ingestion_jobs` row, calls `ingestMenu()` **without awaiting** (fire-and-forget), returns `jobId`.
 3. Client polls `GET /api/menu/job/[jobId]` every 2s.
 4. `modules/menu/parser.ts`: PDF → text via `pdf-parse` | Image → GPT-4o Vision → GPT-4o (JSON mode) extracts categories/items → rows inserted → `embedMenuItem()` called serially for each item.
-5. `generateMealCombinations()` kicks off in the background from the parser; failure is swallowed on purpose — it must not fail the ingest.
+5. For **image menus only**, Vision is also asked to return normalized bboxes for each dish's photo. `modules/menu/images.ts::cropAndSaveDishImage()` uses `sharp` to crop those regions into WebP and upload them to the `dish-images` bucket. Failures here are swallowed — best-effort, owner can always upload manually.
+6. `generateMealCombinations()` kicks off in the background from the parser; failure is swallowed on purpose — it must not fail the ingest.
+7. If ingest throws, `/api/menu/ingest` removes the source file from `menu-uploads` to avoid orphan objects.
 
-**Re-embedding invariant:** in `updateItem` (`app/actions/menu.ts`), when name/description changes the code sets `embedding = null`. There is currently **no worker re-embedding these rows** — they drop out of RAG until re-embedded. Preserve this invariant or add an explicit re-embed step.
+**Re-embedding invariant:** in `updateItem` (`app/actions/menu.ts`), when name/description changes the code sets `embedding = null` AND calls `scheduleReembed(id)` (fire-and-forget) to regenerate the embedding. If you add a new path that mutates fields used by `buildEmbeddingText()` (name/description/tags/allergens/pairings), call `scheduleReembed()` to keep RAG consistent.
 
 ### Chat engine (cross-lingual RAG) — `modules/chat/engine.ts`
 
@@ -93,9 +95,11 @@ Per user message:
 2. Embed the translated query, call `match_menu_items` RPC (cosine similarity, top 6, `available = true`, `embedding is not null`).
 3. Filter matches below `SIMILARITY_THRESHOLD = 0.3` to prevent hallucinating off-topic context.
 4. Also fetch currently-unavailable items so the AI can say "sold out tonight" gracefully instead of silently ignoring them.
-5. `modules/chat/prompts.ts::buildSystemPrompt()` — hard-locks output language to `userLanguage`, enforces no hallucination, price integrity, allergen safety.
+5. `modules/chat/prompts.ts::buildSystemPrompt()` — hard-locks output language to `userLanguage`, enforces no hallucination, price integrity, allergen safety. **Also instructs the model to append `[[dish:<id>]]` on its own line after recommending a specific dish from the context.** The dish id is shown in the MENU section as `id=\`...\``.
 6. `streamText` with `gpt-4o`, `stopWhen: stepCountIs(3)`, one tool: `searchWeb` (Tavily) for culinary context the menu doesn't cover.
-7. Returns `{ stream, analytics }`. `/api/chat` fires `trackEvent("message_sent", {...analytics, hour, day_of_week, message_index})` without awaiting, then returns `stream.toUIMessageStreamResponse()`.
+7. Returns `{ stream, analytics }`. `/api/chat` fires `trackEvent("message_sent", {...analytics, hour, day_of_week, message_index})` without awaiting, then returns `stream.toUIMessageStreamResponse()`. The route **validates `sessionId` is a UUID**; invalid ids drop analytics rather than failing the insert.
+
+**Dish card protocol:** `app/[slug]/ChatInterface.tsx` parses assistant text and replaces complete `[[dish:<uuid>]]` tokens with an inline `DishCard` (image, name, price, tags, allergens). Partial tokens during streaming stay as text until the closing `]]` arrives — never renders half-parsed cards. Card data is looked up client-side from the `items` prop loaded server-side by `app/[slug]/page.tsx`.
 
 If you change the analytics shape, update `modules/insights/analyzer.ts` — it reads `properties.userQuery`, `userLanguage`, `matchedItems`, `topSimilarity`, `hour`.
 
@@ -115,7 +119,12 @@ Single sink: `modules/events/tracker.ts::trackEvent()` → `events` table (jsonb
 
 ## Database migrations
 
-In `supabase/migrations/`. Apply in filename order. **Two files share the `003_` prefix** (`003_chef_notes.sql` and `003_contact_leads.sql`) — they touch different tables and both must be applied. `003_chef_notes.sql` drops and recreates the `match_menu_items` RPC to include `chef_notes` in its return type; any change to what RAG needs from menu items requires another drop+recreate here.
+In `supabase/migrations/`. Apply in filename order. **Two files share the `003_` prefix** (`003_chef_notes.sql` and `003_contact_leads.sql`) — they touch different tables and both must be applied. `003_chef_notes.sql` drops and recreates the `match_menu_items` RPC to include `chef_notes`; `005_dish_images.sql` drops and recreates it again to include `id` + `image_url` (required by the dish-card UI). Any change to what RAG needs from menu items requires another drop+recreate here.
+
+**Storage buckets** (create via the Supabase dashboard or SQL — not tracked in migrations because they live under the `storage` schema):
+- `menu-uploads` — PDFs/images uploaded by owners, read by ingest
+- `logos` — restaurant logos, public read
+- `dish-images` — auto-cropped or manually-uploaded dish photos, public read, authenticated-or-service-role write. The SQL snippet is commented in `005_dish_images.sql`.
 
 ## UX / UI standard
 
